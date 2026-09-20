@@ -59,6 +59,17 @@ jobs:
           echo "Using Valheim managed assemblies from: $managed"
           echo "VALHEIM_MANAGED=$managed" >> "$GITHUB_ENV"
 
+      - name: Download BepInExPack for build references
+        shell: bash
+        run: |
+          curl -L --fail --retry 3 -o "$GITHUB_WORKSPACE/bepinex.zip" "https://thunderstore.io/package/download/denikson/BepInExPack_Valheim/5.4.2333/"
+          mkdir -p "$GITHUB_WORKSPACE/bepinex"
+          unzip -q "$GITHUB_WORKSPACE/bepinex.zip" -d "$GITHUB_WORKSPACE/bepinex"
+          core="$GITHUB_WORKSPACE/bepinex/BepInExPack_Valheim/BepInEx/core"
+          test -f "$core/BepInEx.dll"
+          test -f "$core/0Harmony.dll"
+          echo "BEPINEX_CORE=$core" >> "$GITHUB_ENV"
+
       - name: Restore
         run: dotnet restore AzimuthStonecutterBronze.csproj
 
