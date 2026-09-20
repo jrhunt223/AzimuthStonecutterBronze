@@ -35,7 +35,18 @@ jobs:
       - name: Download current Valheim Dedicated Server assemblies
         shell: bash
         run: |
-          steamcmd +force_install_dir "$GITHUB_WORKSPACE/valheim-server" +login anonymous +app_info_update 1 +app_update 896660 -beta public validate +exit
+          # SteamCMD can return "Missing configuration" on its first fresh invocation.
+          # Initialize/update app metadata first, then retry the install if needed.
+          steamcmd +login anonymous +app_info_update 1 +quit
+          for attempt in 1 2 3; do
+            echo "Valheim download attempt $attempt..."
+            if steamcmd +force_install_dir "$GITHUB_WORKSPACE/valheim-server" +login anonymous +app_info_update 1 +app_update 896660 -beta public validate +quit; then
+              if [ -f "$GITHUB_WORKSPACE/valheim-server/valheim_server_Data/Managed/assembly_valheim.dll" ]; then
+                break
+              fi
+            fi
+            sleep 5
+          done
 
           managed="$GITHUB_WORKSPACE/valheim-server/valheim_server_Data/Managed"
           if [ ! -f "$managed/assembly_valheim.dll" ]; then
