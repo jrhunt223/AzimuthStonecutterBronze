@@ -1,0 +1,111 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.x"
+
+      # Match the approach used by Jotunn's own GitHub Actions workflow.
+      - name: Install SteamCMD
+        uses: CyberAndrii/setup-steamcmd@v1
+
+      - name: Download current Valheim Dedicated Server assemblies
+        shell: bash
+        run: |
+          # SteamCMD can return "Missing configuration" on its first fresh invocation.
+          # Initialize/update app metadata first, then retry the install if needed.
+          steamcmd +login anonymous +app_info_update 1 +quit
+          for attempt in 1 2 3; do
+            echo "Valheim download attempt $attempt..."
+            if steamcmd +force_install_dir "$GITHUB_WORKSPACE/valheim-server" +login anonymous +app_info_update 1 +app_update 896660 -beta public validate +quit; then
+              if [ -f "$GITHUB_WORKSPACE/valheim-server/valheim_server_Data/Managed/assembly_valheim.dll" ]; then
+                break
+              fi
+            fi
+            sleep 5
+          done
+
+          managed="$GITHUB_WORKSPACE/valheim-server/valheim_server_Data/Managed"
+          if [ ! -f "$managed/assembly_valheim.dll" ]; then
+            echo "Downloaded Valheim directory tree:"
+            find "$GITHUB_WORKSPACE/valheim-server" -maxdepth 4 -type f -print || true
+            echo "::error::assembly_valheim.dll was not found at $managed"
+            exit 1
+          fi
+
+          echo "Using Valheim managed assemblies from: $managed"
+          echo "VALHEIM_MANAGED=$managed" >> "$GITHUB_ENV"
+
+      - name: Download BepInExPack for build references
+        shell: bash
+        run: |
+          curl -L --fail --retry 3 -o "$GITHUB_WORKSPACE/bepinex.zip" "https://thunderstore.io/package/download/denikson/BepInExPack_Valheim/5.4.2333/"
+          mkdir -p "$GITHUB_WORKSPACE/bepinex"
+          unzip -q "$GITHUB_WORKSPACE/bepinex.zip" -d "$GITHUB_WORKSPACE/bepinex"
+          core="$GITHUB_WORKSPACE/bepinex/BepInExPack_Valheim/BepInEx/core"
+          test -f "$core/BepInEx.dll"
+          test -f "$core/0Harmony.dll"
+          echo "BEPINEX_CORE=$core" >> "$GITHUB_ENV"
+
+      - name: Restore
+        run: dotnet restore AzimuthStonecutterBronze.csproj
+
+      - name: Build
+        run: dotnet build AzimuthStonecutterBronze.csproj --configuration Release --no-restore
+
+      - name: Stage package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package/plugins | Out-Null
+          Copy-Item bin/Release/net462/AzimuthStonecutterBronze.dll package/plugins/
+          Copy-Item README.md package/
+          if (Test-Path LICENSE.txt) { Copy-Item LICENSE.txt package/ }
+          if (Test-Path LICENSE) { Copy-Item LICENSE package/ }
+          @'
+          {
+            "name": "AzimuthStonecutterBronze",
+            "version_number": "1.0.0",
+            "website_url": "https://github.com/jrhunt223/AzimuthStonecutterBronze",
+            "description": "Changes the Valheim Stonecutter cost from 2 Iron to 2 Bronze while preserving Iron progression for the Sharpening Stone.",
+            "dependencies": [
+              "denikson-BepInExPack_Valheim-5.4.2333",
+              "ValheimModding-Jotunn-2.30.1"
+            ]
+          }
+          '@ | Set-Content package/manifest.json
+          Compress-Archive -Path package/* -DestinationPath AzimuthStonecutterBronze.zip -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AzimuthStonecutterBronze
+          path: AzimuthStonecutterBronze.zip
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AzimuthStonecutterBronze.zip
+          generate_release_notes: true
