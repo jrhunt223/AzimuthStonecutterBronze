@@ -37,10 +37,14 @@ jobs:
         run: |
           $steamcmd = (Get-Command steamcmd.exe).Source
           & $steamcmd +force_install_dir "$env:GITHUB_WORKSPACE\valheim-server" +login anonymous +app_update 896660 validate +quit
-          $managed = "$env:GITHUB_WORKSPACE\valheim-server\valheim_server_Data\Managed"
-          if (!(Test-Path "$managed\assembly_valheim.dll")) {
-            throw "assembly_valheim.dll was not found at $managed"
+          $assembly = Get-ChildItem -Path "$env:GITHUB_WORKSPACE\valheim-server" -Filter "assembly_valheim.dll" -Recurse -File | Select-Object -First 1
+          if ($null -eq $assembly) {
+            Write-Host "Downloaded Valheim directory tree:"
+            Get-ChildItem -Path "$env:GITHUB_WORKSPACE\valheim-server" -Recurse | Select-Object -ExpandProperty FullName
+            throw "assembly_valheim.dll was not found anywhere in the downloaded Valheim Dedicated Server."
           }
+          $managed = $assembly.DirectoryName
+          Write-Host "Using Valheim managed assemblies from: $managed"
           "VALHEIM_MANAGED=$managed" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Restore
