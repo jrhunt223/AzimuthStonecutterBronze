@@ -36,7 +36,7 @@ jobs:
         shell: pwsh
         run: |
           $steamcmd = (Get-Command steamcmd.exe).Source
-          & $steamcmd +force_install_dir "$env:GITHUB_WORKSPACE\valheim-server" +login anonymous +app_update 896660 validate +quit
+          & $steamcmd +force_install_dir "$env:GITHUB_WORKSPACE\valheim-server" +login anonymous +app_update 896660 -beta public validate +quit
           $assembly = Get-ChildItem -Path "$env:GITHUB_WORKSPACE\valheim-server" -Filter "assembly_valheim.dll" -Recurse -File | Select-Object -First 1
           if ($null -eq $assembly) {
             Write-Host "Downloaded Valheim directory tree:"
