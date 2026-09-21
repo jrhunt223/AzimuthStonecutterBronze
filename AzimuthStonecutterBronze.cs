@@ -15,7 +15,7 @@ namespace AzimuthGaming.StonecutterBronze
     {
         public const string PluginGuid = "com.azimuthgaming.stonecutterbronze";
         public const string PluginName = "Azimuth Stonecutter Bronze";
-        public const string PluginVersion = "1.0.0";
+        public const string PluginVersion = "1.0.1";
 
         private Harmony _harmony;
 
@@ -78,20 +78,32 @@ namespace AzimuthGaming.StonecutterBronze
         }
 
         // The Sharpening Stone is normally progression-gated indirectly because the
-        // Stonecutter itself requires Iron. Since this mod moves the Stonecutter to
-        // Bronze, explicitly preserve that progression gate: the player must have
-        // discovered Iron before Sharpening Stone can remain in known recipes.
+        // Stonecutter itself requires Iron. Moving the Stonecutter to Bronze would make
+        // Player.UpdateKnownRecipesList discover the Sharpening Stone immediately.
+        //
+        // Hide that one recipe from ObjectDB while the vanilla discovery pass runs for
+        // players who have not discovered Iron. This prevents both the unlock itself
+        // and the repeated "New crafting recipe" notification. If an earlier version
+        // already added the recipe, remove it once from the player's known set.
         [HarmonyPatch(typeof(Player), "UpdateKnownRecipesList")]
         private static class PreserveSharpeningStoneIronGate
         {
             private static readonly System.Reflection.FieldInfo KnownRecipesField = AccessTools.Field(typeof(Player), "m_knownRecipes");
             private static readonly System.Reflection.FieldInfo KnownMaterialField = AccessTools.Field(typeof(Player), "m_knownMaterial");
 
-            private static void Postfix(Player __instance)
+            private sealed class GateState
             {
+                public Recipe Recipe;
+                public int Index;
+            }
+
+            private static void Prefix(Player __instance, out GateState __state)
+            {
+                __state = null;
+
                 try
                 {
-                    if (__instance == null || ObjectDB.instance == null) return;
+                    if (__instance == null || ObjectDB.instance == null || ObjectDB.instance.m_recipes == null) return;
 
                     HashSet<string> knownRecipes = KnownRecipesField.GetValue(__instance) as HashSet<string>;
                     HashSet<string> knownMaterials = KnownMaterialField.GetValue(__instance) as HashSet<string>;
@@ -108,12 +120,40 @@ namespace AzimuthGaming.StonecutterBronze
                     string ironToken = iron.m_itemData.m_shared.m_name;
                     string sharpeningToken = sharpeningStone.m_itemData.m_shared.m_name;
 
-                    if (!knownMaterials.Contains(ironToken))
-                        knownRecipes.Remove(sharpeningToken);
+                    if (knownMaterials.Contains(ironToken)) return;
+
+                    // Clean up characters that learned it while running v1.0.0.
+                    knownRecipes.Remove(sharpeningToken);
+
+                    for (int i = 0; i < ObjectDB.instance.m_recipes.Count; ++i)
+                    {
+                        Recipe recipe = ObjectDB.instance.m_recipes[i];
+                        if (recipe != null && recipe.m_item != null && recipe.m_item.gameObject.name == "SharpeningStone")
+                        {
+                            __state = new GateState { Recipe = recipe, Index = i };
+                            ObjectDB.instance.m_recipes.RemoveAt(i);
+                            break;
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogError("[Azimuth Stonecutter Bronze] Iron progression gate failed: " + ex);
+                    Debug.LogError("[Azimuth Stonecutter Bronze] Iron progression gate prefix failed: " + ex);
+                }
+            }
+
+            private static void Postfix(GateState __state)
+            {
+                try
+                {
+                    if (__state == null || __state.Recipe == null || ObjectDB.instance == null || ObjectDB.instance.m_recipes == null) return;
+
+                    int index = Math.Max(0, Math.Min(__state.Index, ObjectDB.instance.m_recipes.Count));
+                    ObjectDB.instance.m_recipes.Insert(index, __state.Recipe);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError("[Azimuth Stonecutter Bronze] Iron progression gate restore failed: " + ex);
                 }
             }
         }
